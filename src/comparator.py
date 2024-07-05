@@ -1,9 +1,10 @@
 import datetime
-import pandas as pd
-import unittest
 import os
 import openpyxl
+import pandas as pd
+import unittest
 import unittestreport
+import warnings
 
 # 全局固定变量
 LOCAL_ORDER_COLUMN = 'delivery_order_sn'
@@ -17,22 +18,35 @@ class DataComparison(unittest.TestCase):
         self.local_file = local_file
         self.local_flow_file = local_flow_file
 
-    def file_check(self):
+    def check_distribution_orders(self):
+        print(f"-------------------------------- 配送单对账 --------------------------------") 
         # 检查本地配送单
         if not self.local_file or not os.path.isfile(self.local_file):
             raise ValueError("配送单不存在！")
-
-    def compare_data(self): 
-        print(f"----------------------- {CAPACITY_PLATFORM} 平台对账 -----------------------") 
-
-        # 检查第三方订单是否存在
-        if not self.third_party_file or not os.path.isfile(self.third_party_file):
-            raise ValueError("{CAPACITY_PLATFORM}订单不存在！")
 
         # 读取本地数据表
         local_df = pd.read_excel(self.local_file, engine='openpyxl')
         if local_df.empty:
             raise ValueError("配送单文件表解析失败")
+
+        unique_delivery_platforms = local_df['发单运力'].dropna().unique()
+
+        for platform in unique_delivery_platforms:
+            platform_data = local_df[(local_df['发单运力'] == platform) & (local_df['配送状态'] == '配送完成')]
+            platform_total_free = round(platform_data['free'].sum(), 2)
+            print(f"配送平台: '{platform:6}'\t扣款金额总和: '{platform_total_free:.2f}'")
+
+
+    def compare_data(self): 
+        print(f"----------------------- {CAPACITY_PLATFORM} 平台对账 -----------------------") 
+ 
+        local_df = pd.read_excel(self.local_file, engine='openpyxl')
+        if local_df.empty:
+            raise ValueError("配送单文件表解析失败")
+
+        # 检查第三方订单是否存在
+        if not self.third_party_file or not os.path.isfile(self.third_party_file):
+            raise ValueError("{CAPACITY_PLATFORM}订单不存在！")
 
         # 确保本地订单中有必要的列
         if LOCAL_ORDER_COLUMN not in local_df.columns or '发单运力' not in local_df.columns or '配送状态' not in local_df.columns or 'delivery_channel' not in local_df.columns:
@@ -61,6 +75,8 @@ class DataComparison(unittest.TestCase):
 
         total_third_amount = 0.00
         total_local_amount = 0.00
+        exception_orders = []
+
         for index, row in flash_delivery_data.iterrows():
             order_number = row['delivery_order_sn']
             order_amount = row['free']
@@ -85,26 +101,28 @@ class DataComparison(unittest.TestCase):
                 amount = round(third_party_amount, 2) - round(order_amount, 2)
 
                 if third_party_amount == order_amount:
-                    print(f"Pass: 配送单: '{order_number:<31}' 金额: '{order_amount:.2f}';\t{CAPACITY_PLATFORM}订单: '{third_party_self_number:<10}' 金额: '{third_party_amount:.2f}'")
+                    print(f"Pass: 配送单: '{order_number:<31}' 金额: '{order_amount:.2f}';\t{CAPACITY_PLATFORM}订单: '{third_party_self_number:<10}' 金额: '{third_party_amount:.2f}';")
                 else:
-                    print(f"Fail: 配送单: '{order_number:<31}' 金额: '{order_amount:.2f}';\t{CAPACITY_PLATFORM}订单: '{third_party_self_number:<10}' 金额: '{third_party_amount:.2f}';\t差值: '{amount:.2f}'")
+                    order_message = f"Fail: 配送单: '{order_number:<31}' 金额: '{order_amount:.2f}';\t{CAPACITY_PLATFORM}订单: '{third_party_self_number:<10}' 金额: '{third_party_amount:.2f}';\t差值: '{amount:.2f}'"
+                    print(order_message)
+                    exception_orders.append(order_message)
             else:
-                print(f"{CAPACITY_PLATFORM}订单中未找到配送订单中对应的订单编号: '{order_number}', 金额：'{order_amount}'")
-
+                exception_orders.append(f"{CAPACITY_PLATFORM}订单中未找到配送订单中对应的订单编号: '{order_number}', 金额：'{order_amount}'")
 
         print()
 
         # 对两个累计和统一2位小数精度
         total_third_amount = round(total_third_amount, 2)
         total_local_amount = round(total_local_amount, 2)
-
         difference = round(total_third_amount - total_local_amount, 2)
+
         if difference == 0:
             print(f"对账正常: 配送单 {self.local_file} 与{CAPACITY_PLATFORM}第三方订单 {self.third_party_file} 扣款金额相等({total_third_amount})")
-        elif difference > 0:
-            print(f"对账异常: 第三方平台多扣款 {difference}元 【 配送单扣款金额:{total_local_amount} {CAPACITY_PLATFORM} 扣款金额：{total_third_amount}】")
         else:
-            print(f"对账异常: 第三方平台少扣款 {abs(difference)}元 【 配送单扣款金额: {total_local_amount} {CAPACITY_PLATFORM} 扣款金额：{total_third_amount}】")
+            exception_type = "多" if difference > 0 else "少"
+            print(f"对账异常: 第三方平台{exception_type}扣款 {abs(difference)}元 【 配送单扣款金额:{total_local_amount} {CAPACITY_PLATFORM}平台扣款金额：{total_third_amount}】")
+            for order in exception_orders:
+                print(order)
         print(f"---------------------------------------------------------------------------\n") 
 
 
@@ -154,13 +172,13 @@ class DataComparison(unittest.TestCase):
     
                 if not delivery_data.empty:
                     free_value = delivery_data['free'].values[0]
-                    print(f"发单运力：{dispatch_platform:<5}  订单号: '{order_id:<31}' 扣款金额：'{free_value:.2f}'")
+                    print(f"发单运力：{dispatch_platform:<8}  订单号: '{order_id:<31}' 扣款金额：'{free_value:.2f}'")
                     order_total_free += free_value
                     order_amounts = local_df.loc[(local_df['delivery_order_sn'] == order_id) & (local_df['配送状态'] == '配送完成'), 'free'].tolist()
                     order_amount_str = ' '.join([f"{order_id}|{amount}" for amount in order_amounts])
                     valid_orders.append(order_amount_str)
                 else:
-                    print(f"发单运力：{dispatch_platform:<5}  订单号: '{order_id:<31}' 未完成状态, 忽略")
+                    print(f"发单运力：{dispatch_platform:<8}  订单号: '{order_id:<31}' 未完成状态, 忽略")
             
             order_total_free = round(order_total_free, 2)
             valid_orders.append(f"该商户配送单中累计扣款: {order_total_free}")
@@ -172,7 +190,7 @@ class DataComparison(unittest.TestCase):
 
     def runTest(self):
         try:
-            self.file_check()
+            self.check_distribution_orders()
         except Exception as e:
             print(f"An error occurred during file check: {e}")
 
@@ -189,10 +207,14 @@ class DataComparison(unittest.TestCase):
 
 # 测试代码
 if __name__ == "__main__":
+    # 忽略关于默认样式的警告
+    warnings.filterwarnings("ignore", "You are trying to set a value on a read-only property")
+    warnings.filterwarnings("ignore", category=UserWarning, module='openpyxl.styles.stylesheet')
 
     third_party_file = os.path.join(os.path.dirname(__file__), '..', 'data', '闪送6.24-6.30.xlsx')
     local_file = os.path.join(os.path.dirname(__file__), '..', 'data', '配送单6.24-6.30.xlsx')
     local_flow_file = os.path.join(os.path.dirname(__file__), '..', 'data', '本地流水6.24--6.30.xlsx')
+
 
     suite = unittest.TestSuite()
     data_comparison_test = DataComparison(methodName='runTest', third_party_file=third_party_file, local_file=local_file, local_flow_file=local_flow_file)
