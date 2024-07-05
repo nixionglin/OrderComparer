@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 
 def parse_csv_to_dataframe(file_path):
@@ -20,16 +21,33 @@ def generate_summary_data(dataframe):
     :return: 开始时间, 结束时间, 店铺ID, 比较开始时间, 比较结束时间
     """
     # 根据日期进行汇总
-    start_date = pd.to_datetime(dataframe['日期'].str.split('-', expand=True)[0]).min().strftime('%Y%m%d') + ' 00:00:00'
-    end_date = pd.to_datetime(dataframe['日期'].str.split('-', expand=True)[1]).max().strftime('%Y%m%d') + ' 23:59:59'
+    if dataframe is not None and '日期' in dataframe.columns and dataframe['日期'].notna().all():
+        date_split = dataframe['日期'].str.split('-', expand=True)
+        if not date_split.empty and date_split.shape[1] > 1:
+            start_date = pd.to_datetime(date_split[0]).min().strftime('%Y%m%d') + ' 00:00:00'
+            end_date = pd.to_datetime(date_split[1]).max().strftime('%Y%m%d') + ' 23:59:59'
+        else:
+            start_date = None
+            end_date = None
+    else:
+        start_date = None
+        end_date = None
 
     # 根据下单时间返回比较开始时间与结束时间
-    dataframe['下单日期'] = pd.to_datetime(dataframe['下单时间']).dt.date
-    compare_start_time = dataframe['下单日期'].min().strftime('%Y-%m-%d') + ' 00:00:00'
-    compare_end_time = dataframe['下单日期'].max().strftime('%Y-%m-%d') + ' 23:59:59'
+    if dataframe is not None and '下单时间' in dataframe.columns and not dataframe['下单时间'].isna().all():
+        dataframe['下单日期'] = pd.to_datetime(dataframe['下单时间']).dt.date
+        if not dataframe['下单日期'].isna().all():
+            compare_start_time = dataframe['下单日期'].min().strftime('%Y-%m-%d') + ' 00:00:00'
+            compare_end_time = dataframe['下单日期'].max().strftime('%Y-%m-%d') + ' 23:59:59'
+        else:
+            compare_start_time = None
+            compare_end_time = None
+    else:
+        compare_start_time = None
+        compare_end_time = None
 
     # 根据店铺ID汇总
-    poiIds = dataframe['店铺ID'].unique()
+    poiIds = dataframe['店铺ID'].unique() if dataframe is not None and '店铺ID' in dataframe.columns else []
     poiId = poiIds[0] if len(poiIds) == 1 else None
 
     return start_date, end_date, compare_start_time, compare_end_time, poiId
@@ -40,23 +58,34 @@ def get_order_amount_list(dataframe):
     :param dataframe: 数据内容
     :return: day, validOrderAmount, validOrderAmount, validOrderPrice
     """
-    dataframe['下单日期'] = pd.to_datetime(dataframe['下单时间']).dt.strftime('%m.%d')
+    if dataframe is not None and '下单时间' in dataframe.columns and not dataframe['下单时间'].isna().all():
+        dataframe['下单日期'] = pd.to_datetime(dataframe['下单时间']).dt.strftime('%m.%d')
+    else:
+        if dataframe is not None:
+            dataframe['下单日期'] = None
     
-    validOrderAmount = dataframe.groupby('下单日期')['订单总金额'].sum() - dataframe.groupby('下单日期')['订单折扣后金额'].sum()
-    validOrderAmount = validOrderAmount.reset_index(name='validOrderAmount')
-    
-    validOrderPrice = dataframe.groupby('下单日期')['订单总金额'].sum() / dataframe.groupby('下单日期').size()
-    validOrderPrice = validOrderPrice.reset_index(name='validOrderPrice')
-
+    if dataframe is not None and '下单日期' in dataframe.columns and '订单总金额' in dataframe.columns and '订单折扣后金额' in dataframe.columns:
+        validOrderAmount = dataframe.groupby('下单日期')['订单总金额'].sum() - dataframe.groupby('下单日期')['订单折扣后金额'].sum()
+        validOrderAmount = validOrderAmount.reset_index(name='validOrderAmount')
+        
+        order_counts = dataframe.groupby('下单日期').size()
+        total_order_amounts = dataframe.groupby('下单日期')['订单总金额'].sum()
+        validOrderPrice = total_order_amounts / order_counts
+        validOrderPrice = validOrderPrice.reset_index(name='validOrderPrice')
+    else:
+        validOrderAmount = pd.DataFrame(columns=['下单日期', 'validOrderAmount'])
+        validOrderPrice = pd.DataFrame(columns=['下单日期', 'validOrderPrice'])
+        
     result_list = []
-    for index, row in dataframe.iterrows():
-        result = {
-            "day": row['下单日期'],
-            "validOrderAmount": row['订单总金额'],
-            "lossAmount": row['订单总金额'] - row['订单折扣后金额'],
-            "validOrderPrice": row['订单总金额'] / dataframe[dataframe['下单日期'] == row['下单日期']].shape[0]
-        }
-        result_list.append(result)
+    if dataframe is not None:
+        for index, row in dataframe.iterrows():
+            result = {
+                "day": row['下单日期'],
+                "validOrderAmount": row['订单总金额'],
+                "lossAmount": row['订单总金额'] - row['订单折扣后金额'],
+                "validOrderPrice": row['订单总金额'] / dataframe[dataframe['下单日期'] == row['下单日期']].shape[0]
+            }
+            result_list.append(result)
     return result_list
 
 def calculate_order_count(dataframe):
@@ -65,7 +94,7 @@ def calculate_order_count(dataframe):
     :param dataframe: 数据内容
     :return: 推单数
     """
-    order_count = len(dataframe['订单编号'].unique())
+    order_count = len(dataframe['订单编号'].unique()) if dataframe is not None else 0
     return order_count
 
 
@@ -75,7 +104,10 @@ def get_valid_order_count(dataframe):
     :param dataframe: 数据内容
     :return: 有效订单总数
     """
-    valid_order_count = len(dataframe[(dataframe['订单状态'] == '订单完成') | (dataframe['订单状态'] == '订单已处理')])
+    if dataframe is not None:
+        valid_order_count = len(dataframe[(dataframe['订单状态'] == '订单完成') | (dataframe['订单状态'] == '订单已处理')])
+    else:
+        valid_order_count = 0
     return valid_order_count
 
 def get_valied_order_rate(dataframe):
@@ -129,6 +161,19 @@ def get_date_count(dataframe):
         days_count = 1  # Fallback if '日期' column is missing or empty
     return days_count
 
+def get_days_count(dataframe):
+    """
+    计算日期范围列中的天数
+    :param dataframe: 数据内容
+    :return: 日期天数
+    """
+    if '日期' in dataframe.columns:
+        date_series = pd.to_datetime(dataframe['日期'])
+        days_count = (date_series.max() - date_series.min()).days + 1
+    else:
+        days_count = 1  # Fallback if '日期' column is missing or empty
+    return days_count
+
 def get_daily_average_push_orders(dataframe):
     """
     获取日均推单数，日均推单数 = 所有推单数 / 日期天数
@@ -165,13 +210,16 @@ def get_cancelled_order_count(dataframe):
     :param dataframe: 数据内容
     :return: 订单取消总数
     """
-    cancelled_order_count = len(dataframe[dataframe['订单状态'] == '订单取消'])
+    if dataframe is not None and '订单状态' in dataframe.columns:
+        cancelled_order_count = len(dataframe[dataframe['订单状态'] == '订单取消'])
+    else:
+        cancelled_order_count = 0
     return cancelled_order_count
-
 
 
 # 测试代码
 def test_summarize_data(csv_file_path):
+    print('-----> ' + csv_file_path)
     # Read test data from CSV file
     test_df = parse_csv_to_dataframe(csv_file_path)
 
@@ -205,5 +253,5 @@ def test_summarize_data(csv_file_path):
     print(f"取消订单数: {cancelled_order_count}")
 
 if __name__ == "__main__":
-    csv_file_path = 'data/20240101-20240428-1714284673513.csv'
+    csv_file_path = os.path.join(os.path.dirname(__file__), '..', 'data', '20240101-20240428-1714284673513.csv')
     test_summarize_data(csv_file_path)
