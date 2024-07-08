@@ -11,6 +11,11 @@ LOCAL_ORDER_COLUMN = 'delivery_order_sn'
 THIRD_PARTY_ORDER_COLUMN = '三方订单编号'
 CAPACITY_PLATFORM = '闪送'
 
+
+
+
+
+
 class DataComparison(unittest.TestCase):
     def __init__(self, methodName='runTest', third_party_file=None, local_file=None, local_flow_file=None):
         super(DataComparison, self).__init__(methodName)
@@ -18,8 +23,13 @@ class DataComparison(unittest.TestCase):
         self.local_file = local_file
         self.local_flow_file = local_flow_file
 
+
+
+
+
+
     def check_distribution_orders(self):
-        print(f"-------------------------------- 配送单对账 --------------------------------") 
+        print(f"--------------------------- 配送单各平台扣款汇总 ---------------------------") 
         # 检查本地配送单
         if not self.local_file or not os.path.isfile(self.local_file):
             raise ValueError("配送单不存在！")
@@ -32,13 +42,13 @@ class DataComparison(unittest.TestCase):
         unique_delivery_platforms = local_df['发单运力'].dropna().unique()
 
         for platform in unique_delivery_platforms:
-            platform_data = local_df[(local_df['发单运力'] == platform) & (local_df['配送状态'] == '配送完成')]
+            platform_data = local_df[(local_df['发单运力'] == platform) & (local_df['配送状态'] == '配送完成') & (local_df['delivery_channel'] == 0)]
             platform_total_free = round(platform_data['free'].sum(), 2)
             print(f"配送平台: '{platform:6}'\t扣款金额总和: '{platform_total_free:.2f}'")
 
 
     def compare_data(self): 
-        print(f"----------------------- {CAPACITY_PLATFORM} 平台对账 -----------------------") 
+        print(f"----------------------- 配送单与{CAPACITY_PLATFORM}平台对账 -----------------------") 
  
         local_df = pd.read_excel(self.local_file, engine='openpyxl')
         if local_df.empty:
@@ -71,7 +81,7 @@ class DataComparison(unittest.TestCase):
 
         flash_delivery_data = local_df[(local_df['发单运力'] == CAPACITY_PLATFORM) & (local_df['配送状态'] == '配送完成') & (local_df['delivery_channel'] == 0)]
         local_row_count = len(flash_delivery_data)
-        print(f"配送订单对应{CAPACITY_PLATFORM}发单运力符合条件(配送状态为已完成, delivery_channel 为 1?)的数据有 {local_row_count} 条") 
+        print(f"配送订单对应{CAPACITY_PLATFORM}发单运力符合条件(配送状态为已完成, delivery_channel 为 0)的数据有 {local_row_count} 条") 
 
         total_third_amount = 0.00
         total_local_amount = 0.00
@@ -91,21 +101,34 @@ class DataComparison(unittest.TestCase):
             if not third_party_order.empty:
                 third_party_order_number = third_party_order.iloc[0]['三方订单编号']
                 third_party_self_number = third_party_order.iloc[0]['订单编号']
-                paid_amount_str = third_party_order.iloc[0]['实付金额(元)']
-                third_party_amount = float(str(paid_amount_str).replace(',', '').strip())
-                # print(f"三方订单编号: '{third_party_order_number}'，实付金额(元): '{third_party_amount}'")
+                third_orider_status = third_party_order.iloc[0]['订单状态']
+
+                third_order_amount = 0.00
+                if third_orider_status == '闪送完成':
+                    third_order_amount += float(str(third_party_order.iloc[0]['实付金额(元)']).replace(',', '').strip())
+                elif third_orider_status == '已取消':
+                        third_order_amount += float(str(third_party_order.iloc[0]['取消单扣款金额(元)']).replace(',', '').strip())
 
                 # 累计本地订单对应第三方订单扣款金额之和
-                total_third_amount += third_party_amount
+                total_third_amount += third_order_amount
 
-                amount = round(third_party_amount, 2) - round(order_amount, 2)
+                # paid_amount_str = third_party_order.iloc[0]['实付金额(元)']
+                # third_order_amount = float(str(third_party_order.iloc[0]['实付金额(元)']).replace(',', '').strip())
 
-                if third_party_amount == order_amount:
-                    print(f"Pass: 配送单: '{order_number:<31}' 金额: '{order_amount:.2f}';\t{CAPACITY_PLATFORM}订单: '{third_party_self_number:<10}' 金额: '{third_party_amount:.2f}';")
+                amount = round(third_order_amount, 2) - round(order_amount, 2)
+                if third_order_amount == order_amount:
+                    print(f"Pass: 配送单: '{order_number:<31}' 金额: '{order_amount:.2f}';\t{CAPACITY_PLATFORM}订单: '{third_party_self_number:<10}' 状态: '{third_orider_status}'  金额: '{third_order_amount:.2f}';")
                 else:
-                    order_message = f"Fail: 配送单: '{order_number:<31}' 金额: '{order_amount:.2f}';\t{CAPACITY_PLATFORM}订单: '{third_party_self_number:<10}' 金额: '{third_party_amount:.2f}';\t差值: '{amount:.2f}'"
+                    order_message = f"Fail: 配送单: '{order_number:<31}' 金额: '{order_amount:.2f}';\t{CAPACITY_PLATFORM}订单: '{third_party_self_number:<10}' 状态: '{third_orider_status}'  金额: '{third_order_amount:.2f}';\t差值: '{amount:.2f}'"
                     print(order_message)
                     exception_orders.append(order_message)
+
+                    # 获取两张表对应订单相关原始数据
+                    local_order_data = local_df[local_df['delivery_order_sn'] == order_number]
+                    exception_orders.append(f"\t*** 配送单相关原始数据 \n{local_order_data.to_string()}")
+
+                    third_party_order = third_party_df[third_party_df['三方订单编号'] == order_number + ',']
+                    exception_orders.append(f"\t*** {CAPACITY_PLATFORM}订单相关原始数据 \n{third_party_order.to_string()}\n")
             else:
                 exception_orders.append(f"{CAPACITY_PLATFORM}订单中未找到配送订单中对应的订单编号: '{order_number}', 金额：'{order_amount}'")
 
