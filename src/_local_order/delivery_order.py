@@ -2,6 +2,7 @@
 import openpyxl
 import os
 import pandas as pd
+import numpy as np
 import warnings
 
 # 配送单类
@@ -93,7 +94,7 @@ class DeliveryOrder:
             '配送单订单': order_number,
             '发单运力：': dispatch_platform,
             '配送状态': order_status,
-            '扣款金额': order_amount
+            '扣款金额': float(format(order_amount, '.2f'))
         }
 
 
@@ -105,7 +106,7 @@ class DeliveryOrder:
 
 # 测试代码
 if __name__ == "__main__":
-    file_path = os.path.join(os.path.dirname(__file__), '..\..', 'data', '配送单6.24-6.30.xlsx')
+    file_path = os.path.join(os.path.dirname(__file__), '..\..', 'data', '配送单7.7-7.14.xlsx')
 
     order = DeliveryOrder(file_path)
 
@@ -119,9 +120,15 @@ if __name__ == "__main__":
 
 
     # admin_amount = order.data[(order.data['admin_id'] == 3787) & (order.data['配送状态'] == '配送完成') & (order.data['delivery_channel'] == 0)]['free'].sum()
-    admin_amount = order.get_total_admin_amount(3787)
-    print(f"指定商户总扣款金额 '{admin_amount}'")
+    # admin_amount = order.get_total_admin_amount(3787)
+    # print(f"指定商户总扣款金额 '{admin_amount}'")
 
-    all_orders = order.get_all_order_by_admin(3787)
-    print(f"指定商户订单 '{all_orders}'")
+    # all_orders = order.get_all_order_by_admin(3787)
+    # print(f"指定商户订单 '{all_orders}'")
+
+    import numpy as np
+
+    value = np.float64(370.0)
+    formatted_value = format(value, '.2f')  # 使用format函数
+    print(formatted_value)  # 输出: '370.00'
 

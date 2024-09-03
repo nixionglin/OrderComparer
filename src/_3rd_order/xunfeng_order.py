@@ -4,18 +4,38 @@ import os
 import pandas as pd
 import warnings
 
+from openpyxl import load_workbook
 from .base_order import Base3rdOrder
 
 class XunFengOrder(Base3rdOrder):
+
     def __init__(self, file_path):
-        super().__init__(file_path)
         try:
+            super().__init__(file_path)
+
+            self.check_and_delete_first_row_if_needed(file_path)
             self.order_data = pd.read_excel(file_path, engine='openpyxl')
-            if not self.order_data.columns[0] == '顺丰订单号':
-                self.order_data = self.order_data.iloc[1:]
+     
             self.total_deduction_amount = self.get_total_order_amount() + self.get_total_penalty_amount()
         except Exception as e:
             print(f"读取文件时发生错误: {e}")
+
+    def check_and_delete_first_row_if_needed(self, file_path):
+        workbook = load_workbook(file_path)
+        sheet = workbook.active
+
+        a1_value = sheet['A1'].value
+        if a1_value != "顺丰订单号":
+            sheet.delete_rows(1)
+ 
+            merged_cell_ranges = list(sheet.merged_cells.ranges)
+            for merged_cell in merged_cell_ranges:
+                if merged_cell.min_row == 1:  # 检查是否是现在的第一行（原来的第二行）
+                    sheet.merged_cells.remove(merged_cell)
+
+            workbook.save(file_path)
+
+        workbook.close()
     
     def get_total_order_amount(self):
         total_order_amount = self.order_data[self.order_data['订单状态'] == '已完成']['配送费总价(单位元)'].sum()

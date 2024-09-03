@@ -22,6 +22,27 @@ class TransationOrder:
         
         return self.data['admin_id'].unique()
 
+
+    # 汇总订单信息
+    def get_order_info(self):
+        if self.data.empty:
+            return None
+
+        total_deduction_amount = round(abs(self.data[self.data['type'] == 1]['money'].sum()), 2)
+        total_order_count = len(self.data[self.data['type'] == 1]['delivery_order_id'].drop_duplicates().dropna())
+        total_reward_amount = self.data[(self.data['type'] == 2) & (self.data['method'] == 3)]['money'].sum()
+        total_recharge_amount = self.data[(self.data['type'] == 2) & (self.data['method'].isin([1, 2]))]['money'].sum()
+        total_recharge_count = len(self.data[((self.data['type'] == 2) & ((self.data['method'] == 1) | (self.data['method'] == 2)))])
+
+        return {
+            '流水扣款总金额': format(total_deduction_amount, '.2f'), 
+            '流水去重订单数': total_order_count,
+            '累计新客奖励': format(total_reward_amount, '.2f'), 
+            '累计充值金额': format(total_recharge_amount, '.2f'),
+            '累计充值笔数': format(total_recharge_count, '.2f')
+        }
+
+
     # 获取指定商户数据
     def get_admin_data(self, admin_id):
         if self.data.empty or admin_id is None:
@@ -38,7 +59,7 @@ class TransationOrder:
         return round(abs(admin_data[(admin_data['delivery_order_id'] == order_number) & (admin_data['type'] == 1)]['money'].sum() if 'money' in admin_data else 0), 2)
 
 
-    # 获取指定商户所有订单号
+    # 统计号
     def get_all_order(self, admin_id):
         admin_data = self.get_admin_data(admin_id)
         if admin_data.empty:
@@ -57,27 +78,29 @@ class TransationOrder:
             admin_data = admin_data.sort_values(by='createtime') # 对”createtime“列进行升序排序
             initial_amount = round(admin_data.iloc[0]['before'], 2) # 起始金额=第一行”before“列的值
             balance = round(admin_data.iloc[-1]['after'], 2) #余额=第后一行after值
-            total_deduction_amount = round(abs(admin_data[admin_data['type'] == 1]['money'].sum() if 'money' in admin_data else 0), 2)
-            unique_order_count = len(admin_data[admin_data['type'] == 1]['delivery_order_id'].drop_duplicates().dropna()) if 'money' in admin_data else 0
-            reward_amount = admin_data[(admin_data['type'] == 2) & (admin_data['method'] == 3)]['money'].sum() if 'money' in admin_data else 0
-            recharge_amount = admin_data[(admin_data['type'] == 2) & (admin_data['method'].isin([1, 2]))]['money'].sum() if 'money' in admin_data else 0
-            recharge_count = len(admin_data[((admin_data['type'] == 2) & ((admin_data['method'] == 1) | (admin_data['method'] == 2)))]) if 'money' in admin_data else 0
-            difference = round(abs((initial_amount + reward_amount + recharge_amount - total_deduction_amount) - balance), 2) #订单扣款与水费金额差值，为0时表示正常，反之就是多扣或少扣
+            deduction_amount = round(abs(admin_data[admin_data['type'] == 1]['money'].sum()), 2)
+            order_count = len(admin_data[admin_data['type'] == 1]['delivery_order_id'].drop_duplicates().dropna())
+            reward_amount = admin_data[(admin_data['type'] == 2) & (admin_data['method'] == 3)]['money'].sum()
+            recharge_amount = admin_data[(admin_data['type'] == 2) & (admin_data['method'].isin([1, 2]))]['money'].sum()
+            recharge_count = len(admin_data[((admin_data['type'] == 2) & ((admin_data['method'] == 1) | (admin_data['method'] == 2)))])
+            difference = round(abs((initial_amount + reward_amount + recharge_amount - deduction_amount) - balance), 2) #订单扣款与水费金额差值，为0时表示正常，反之就是多扣或少扣
 
             # 发生订单扣款且差值不为0零时视有异常
-            if total_deduction_amount > 0 and not difference == 0:
+            if deduction_amount > 0 and not difference == 0:
                 print(f"商户'{admin_id}' 存在扣款异常！")
 
-            return {
-                '订单扣款总额': total_deduction_amount, 
-                '订单(去重)数': unique_order_count,
-                '新客奖励': reward_amount, 
-                '充值金额': recharge_amount,
+            result = {
+                '订单扣款金额': deduction_amount, 
+                '订单(去重)数': order_count,
+                '新客奖励': format(reward_amount, '.2f'), 
+                '充值金额': format(recharge_amount, '.2f'),
                 '充值笔数': recharge_count,
-                '初始金额': initial_amount,
-                '账户余额': balance, 
-                '差值': difference
+                '初始金额': format(initial_amount, '.2f'),
+                '账户余额': format(balance, '.2f')
             }
+            if difference != 0:
+                result['差值'] = difference
+            return result
         else:
             return None
 
@@ -88,7 +111,7 @@ if __name__ == "__main__":
     admin_id = 4994
     order_number = '72o92rse2gjha4x7s_gc0uyo42wa4'
 
-    file_path = os.path.join(os.path.dirname(__file__), '../..', 'data', '本地流水6.24--6.30.xlsx')
+    file_path = os.path.join(os.path.dirname(__file__), '../..', 'data', '本地流水7.7-7.14.xlsx')
 
     try:
         # 创建一个 TransactionOrder 实例
@@ -99,7 +122,7 @@ if __name__ == "__main__":
         # print(merchant_data)
 
         # 调用 get_admin_info 方法(逻辑不太清楚，目前还有问题)
-        admin_info = transaction_order.get_admin_info(10786)
+        admin_info = transaction_order.get_admin_info(5671)
         print(f"商户账号信息: {admin_info}")
     
         # total_order_amount = transaction_order.get_total_order_amount(admin_id, order_number)
@@ -107,5 +130,10 @@ if __name__ == "__main__":
 
         # all_orders = transaction_order.get_all_order(5044)
         # print(f"指定用户所有订单:{all_orders}")
+
+        # user=os.getenv("EMAIL_USER")
+        # password=os.getenv("EMAIL_PASSWORD")
+        # print(f"EMAIL_USER: {user}")
+        # print(f"EMAIL_PASSWORD: {password}")
     except Exception as e:
         print(f"An error occurred: {e}")
